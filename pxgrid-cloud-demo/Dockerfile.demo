@@ -1,0 +1,40 @@
+FROM golang:1.21-alpine AS build
+
+WORKDIR /app
+
+# Install git and build dependencies
+RUN apk add --no-cache git build-base
+
+# Install the required Go dependencies
+RUN go mod init pxgrid-demo-app
+RUN go get github.com/gin-contrib/cors@v1.4.0
+RUN go get github.com/gin-gonic/gin@v1.8.1
+RUN go get github.com/gorilla/websocket@v1.5.0
+RUN go get gopkg.in/yaml.v2@v2.4.0
+
+# Copy the real server code
+COPY pxgrid-cloud-demo/backend/main.go .
+COPY pxgrid-cloud-demo/backend/settings.go .
+
+# Build the server
+RUN CGO_ENABLED=0 GOOS=linux go build -o pxgrid-demo-app
+
+# Create a minimal runtime image
+FROM alpine:latest
+
+WORKDIR /app
+
+# Copy the binary and frontend files
+COPY --from=build /app/pxgrid-demo-app /app/
+COPY pxgrid-cloud-demo/frontend/ /app/frontend/
+COPY pxgrid-cloud-demo/config/ /app/config/
+
+# Install CA certificates for TLS
+RUN apk --no-cache add ca-certificates
+
+# Expose port for API and WebSocket
+EXPOSE 8080
+
+# Run the application
+ENV PORT=8080
+CMD ["/app/pxgrid-demo-app"]

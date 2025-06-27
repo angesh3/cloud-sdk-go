@@ -1,0 +1,58 @@
+FROM golang:1.21-alpine AS build
+
+WORKDIR /build
+
+# Install git and build essentials
+RUN apk add --no-cache git build-base
+
+# Copy the SDK code first
+COPY api.go app.go app_test.go appinstance.go device.go device_test.go go.mod go.sum tenant.go tenant_test.go util.go /build/sdk/
+COPY internal/ /build/sdk/internal/
+COPY log/ /build/sdk/log/
+
+# Now copy our application code
+COPY pxgrid-cloud-demo/backend/ /build/app/
+COPY pxgrid-cloud-demo/frontend/ /build/frontend/
+COPY pxgrid-cloud-demo/config/ /build/config/
+
+WORKDIR /build/app
+
+# Update existing go.mod or create one if it doesn't exist
+RUN if [ -f "go.mod" ]; then \
+    go mod edit -replace github.com/cisco-pxgrid/cloud-sdk-go=/build/sdk; \
+    else \
+    go mod init pxgrid-demo; \
+    go mod edit -replace github.com/cisco-pxgrid/cloud-sdk-go=/build/sdk; \
+    fi
+
+# Get dependencies with version constraints
+RUN go get github.com/gin-contrib/cors@v1.4.0
+RUN go get github.com/gin-gonic/gin@v1.8.2
+RUN go get github.com/gorilla/websocket@v1.5.0
+RUN go get gopkg.in/yaml.v2@v2.4.0
+RUN go mod tidy
+
+# Build the application with the real SDK
+RUN go build -o pxgrid-demo-app
+
+# Create a minimal runtime image
+FROM alpine:latest
+
+WORKDIR /app
+
+# Copy the binary
+COPY --from=build /build/app/pxgrid-demo-app /app/
+COPY --from=build /build/frontend/ /app/frontend/
+COPY --from=build /build/config/ /app/config/
+
+# Install CA certificates for TLS
+RUN apk --no-cache add ca-certificates
+
+# Set executable permissions
+RUN chmod +x /app/pxgrid-demo-app
+
+# Expose ports
+EXPOSE 8080
+
+# Run the application
+CMD ["/app/pxgrid-demo-app"]

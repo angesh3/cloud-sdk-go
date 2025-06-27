@@ -1,0 +1,32 @@
+FROM golang:1.21-alpine AS build
+
+WORKDIR /app
+
+# Install git and build dependencies
+RUN apk add --no-cache git build-base
+
+# Copy our files
+COPY . /app/
+
+# Build our demo application
+WORKDIR /app/pxgrid-cloud-demo/backend
+RUN go build -o pxgrid-demo-app .
+
+# Create a minimal runtime image
+FROM alpine:latest
+
+WORKDIR /app
+
+# Copy the binary and frontend files
+COPY --from=build /app/pxgrid-cloud-demo/backend/pxgrid-demo-app /app/
+COPY --from=build /app/pxgrid-cloud-demo/frontend/ /app/frontend/
+COPY --from=build /app/pxgrid-cloud-demo/config/ /app/config/
+
+# Install CA certificates for TLS
+RUN apk --no-cache add ca-certificates
+
+# Expose port for API and WebSocket
+EXPOSE 8080
+
+# Run the application
+CMD ["/app/pxgrid-demo-app"]

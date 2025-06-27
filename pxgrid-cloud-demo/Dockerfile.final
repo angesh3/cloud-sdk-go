@@ -1,0 +1,39 @@
+FROM golang:1.21 AS build
+
+WORKDIR /app
+
+# Install git and build dependencies
+RUN apt-get update && apt-get install -y git build-essential
+
+# Copy the SDK files first
+COPY . /sdk-source/
+WORKDIR /sdk-source
+
+# Build the SDK demo
+WORKDIR /sdk-source/pxgrid-cloud-demo/backend
+# Use the local SDK code through replace directive
+RUN go mod edit -replace github.com/cisco-pxgrid/cloud-sdk-go=../..
+# Download dependencies
+RUN go mod tidy
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -o pxgrid-demo-app .
+
+# Create a minimal runtime image
+FROM alpine:latest
+
+WORKDIR /app
+
+# Copy the binary and frontend files
+COPY --from=build /sdk-source/pxgrid-cloud-demo/backend/pxgrid-demo-app /app/
+COPY --from=build /sdk-source/pxgrid-cloud-demo/frontend/ /app/frontend/
+COPY --from=build /sdk-source/pxgrid-cloud-demo/config/ /app/config/
+
+# Install CA certificates for TLS
+RUN apk --no-cache add ca-certificates
+
+# Expose port for API and WebSocket
+EXPOSE 8080
+
+# Run the application
+ENV PORT=8080
+CMD ["/app/pxgrid-demo-app"]

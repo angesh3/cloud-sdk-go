@@ -1,0 +1,30 @@
+FROM golang:1.16-alpine
+
+WORKDIR /app
+
+# Install git and build essentials
+RUN apk add --no-cache git build-base
+
+# Create a Go module
+RUN go mod init pxgrid-demo
+
+# Install the required Go dependencies
+RUN go get github.com/gin-contrib/cors@v1.4.0
+RUN go get github.com/gin-gonic/gin@v1.8.1
+RUN go get github.com/gorilla/websocket@v1.5.0
+
+# Set environment variables for Go modules
+ENV GO111MODULE=on
+
+# Copy the backend code
+COPY backend/main.go .
+COPY backend/settings.go .
+
+# Build the application
+RUN go build -o pxgrid-demo-server
+
+# Expose the API port
+EXPOSE 8081
+
+# Run the server
+CMD ["/app/pxgrid-demo-server"]

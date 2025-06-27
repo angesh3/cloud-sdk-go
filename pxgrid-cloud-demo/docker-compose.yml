@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  pxgrid-demo:
+    build:
+      context: ..
+      dockerfile: ./pxgrid-cloud-demo/Dockerfile.with-sdk
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/config
+    environment:
+      - CONFIG_FILE=/app/config/config.yaml
+      - PORT=8080
+    restart: unless-stopped

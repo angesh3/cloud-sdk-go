@@ -1,0 +1,109 @@
+body {
+    background-color: #f8f9fa;
+}
+
+.card {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    margin-bottom: 1.5rem;
+}
+
+.message-container {
+    height: 70vh;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+.message {
+    border-left: 4px solid #0d6efd;
+    background-color: #f8f9fa;
+    padding: 10px 15px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+}
+
+.message .time {
+    font-size: 0.8rem;
+    color: #6c757d;
+}
+
+.message .device-name {
+    font-weight: 600;
+    color: #0d6efd;
+}
+
+.message .stream-name {
+    font-size: 0.8rem;
+    background-color: #e9ecef;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 5px;
+}
+
+.message .content {
+    padding-top: 5px;
+    word-break: break-word;
+    font-family: monospace;
+    background-color: #f1f3f5;
+    padding: 10px;
+    border-radius: 4px;
+    margin-top: 5px;
+    max-height: 300px;
+    overflow: auto;
+}
+
+.status-active {
+    color: #198754;
+}
+
+.status-inactive {
+    color: #dc3545;
+}
+
+.tenant-badge {
+    background-color: #6610f2;
+}
+
+/* Device details styling */
+#device-details-card {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+}
+
+#device-details-card .device-detail-header h4 {
+    margin-bottom: 0;
+    font-weight: 500;
+}
+
+#device-details-card .table {
+    margin-bottom: 0;
+}
+
+#device-details-card code {
+    background-color: #f8f9fa;
+    padding: 2px 5px;
+    border-radius: 3px;
+}
+
+/* Highlight effect for the selected device row */
+.table-active {
+    background-color: #e9f2ff !important;
+    border-left: 3px solid #0d6efd;
+}
+
+/* Message highlight effect */
+.message-highlight {
+    border-left: 4px solid #dc3545;
+    box-shadow: 0 2px 5px rgba(220, 53, 69, 0.1);
+}
+
+/* Toast styling */
+.toast {
+    opacity: 1;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .message-container {
+        height: 50vh;
+    }
+}

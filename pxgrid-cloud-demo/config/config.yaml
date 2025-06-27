@@ -1,0 +1,14 @@
+app:
+  id: pxcloud-demo
+  apiKey: TTPAwkA6Tuu3u9pQTomhcPwiTjvsBCwqTXJl7mvlJNpt6SktFWQH5YxDEFMIga8k
+  globalFQDN: dnaservices.cisco.com
+  regionalFQDN: neoffers.cisco.com
+  regionalFQDNs: []
+  readStream: app--pxcloud-demo-R
+  writeStream: app--pxcloud-demo-W
+  groupId: ""
+tenant:
+  otp: ""
+  id: a002a341-1df5-46f1-aa20-b2edb44d966f
+  name: ISE
+  token: RyBJvah6krFtSK0zjIYe13geEF3P4zS4lci7oC0VwLIPMfE9m7iUFGv1bnTryMgZ

@@ -1,0 +1,15 @@
+app:
+  id: "demo-app"
+  apiKey: "demo-key"
+  globalFQDN: "api.pxgrid.cisco.com"
+  regionalFQDN: "api.pxgrid.cisco.com"
+  regionalFQDNs:
+    - "api.pxgrid.cisco.com"
+  readStream: "stream-id"
+  writeStream: "stream-id"
+  groupId: "group-id"
+tenant:
+  otp: ""
+  id: ""
+  name: ""
+  token: ""
