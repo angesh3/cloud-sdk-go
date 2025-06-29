@@ -12,12 +12,36 @@ console.error = function() {
 };
 
 // Global variables
+let ws;
+let deviceData = [];
+let messageData = [];
+let securityGroupsData = [];
+let tenants = [];
+let currentTenantId = null;
 let socket;
 let isConnected = false;
 let currentTenant = null;
 let devicesList = [];
+
+// Note: hiddenFieldDetails function is now defined in utils.js
+
 let selectedDeviceId = null;
-let securityGroupsData = null;
+
+// Functions for hiding device and tenant details
+function hideDeviceDetails() {
+    const detailsCard = document.getElementById('device-details-card');
+    if (detailsCard) {
+        detailsCard.classList.add('d-none');
+    }
+    selectedDeviceId = null;
+}
+
+function hideTenantDetails() {
+    const tenantDetailsCard = document.getElementById('tenant-details-card');
+    if (tenantDetailsCard) {
+        tenantDetailsCard.classList.add('d-none');
+    }
+}
 
 // DOM Elements
 const connectionStatus = document.getElementById('connection-status');
@@ -66,10 +90,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load settings
     fetchSettings();
     
-    // Load security groups data if tenant is connected
-    if (currentTenant) {
+    // Load tenants data - this will initialize currentTenant
+    fetchTenants();
+    
+    // Load security groups data after a short delay to ensure tenant data is loaded
+    setTimeout(() => {
         fetchSecurityGroupsData();
-    }
+    }, 1000);
 });
 
 function setupWebSocket() {
@@ -99,19 +126,19 @@ function handleSocketOpen() {
 function handleSocketMessage(event) {
     const data = JSON.parse(event.data);
     
-    switch(data.type) {
-        case 'message':
-            addMessage(data.message);
-            break;
-        case 'messages':
-            loadMessages(data.messages);
-            break;
-        case 'devices':
-            updateDevicesList(data.devices);
-            break;
-        default:
-            console.log('Unknown message type:', data);
+    if (data.type === 'devices') {
+        deviceData = data.devices;
+        updateDevicesTable();
+    } else if (data.type === 'message') {
+        addMessage(data.message);
+    } else if (data.type === 'tenants') {
+        // Update tenants data
+        tenants = data.tenants;
+        updateTenantTabs(tenants);
     }
+
+    // Update connection status
+    updateConnectionStatus();
 }
 
 function handleSocketClose() {
@@ -239,6 +266,57 @@ function fetchAppStatus() {
         });
 }
 
+// Fetch tenants from API
+function fetchTenants() {
+    console.log('Fetching tenants data...');
+    const apiUrl = '/api/tenants';
+    
+    // Hide the "Link New Tenant" text that might appear in the message container
+    updateMessageContainer();
+    
+    fetch(apiUrl)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Tenants data received:', data);
+            tenants = data;
+            
+            // Find default tenant if any
+            const defaultTenant = tenants.find(tenant => tenant.isDefault);
+            if (defaultTenant) {
+                console.log('Default tenant found:', defaultTenant);
+                currentTenant = defaultTenant;
+                currentTenantId = defaultTenant.id;
+                updateTenantUI();
+                
+                // Update the message container to show the connected tenant
+                const messageContainer = document.getElementById('message-container');
+                if (messageContainer) {
+                    const tenantInfo = document.createElement('div');
+                    tenantInfo.className = 'alert alert-success';
+                    tenantInfo.innerHTML = `
+                        <i class="fa-solid fa-check-circle me-2"></i>
+                        Connected to tenant: <strong>${defaultTenant.name}</strong> (ID: ${defaultTenant.id})
+                    `;
+                    
+                    // Add the tenant info at the top of message container
+                    if (messageContainer.firstChild) {
+                        messageContainer.insertBefore(tenantInfo, messageContainer.firstChild);
+                    } else {
+                        messageContainer.appendChild(tenantInfo);
+                    }
+                }
+            }
+            
+            // Fetch devices for the default tenant
+            if (defaultTenant) {
+                fetchTenantDevices(defaultTenant.id);
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching tenants:', error);
+        });
+}
+
 function linkTenant() {
     const otp = otpInput.value.trim();
     
@@ -347,29 +425,98 @@ function unlinkTenant() {
 }
 
 function updateTenantUI() {
+    // Update tenant indicator elements
+    const activeTenantName = document.getElementById('active-tenant-name');
+    const currentTenantSelector = document.getElementById('current-tenant-selector');
+    const currentTenantNameSpan = document.getElementById('current-tenant-name');
+    const navTenantName = document.getElementById('nav-tenant-name');
+    const tenantNavItem = document.getElementById('tenant-nav-item');
+    
+    // Get the tenants loading elements
+    const tenantsLoading = document.getElementById('tenantsLoading');
+    const messageContainer = document.getElementById('message-container');
+    
     if (currentTenant) {
-        tenantBadge.textContent = currentTenant;
+        // Hide the loading spinner in the message stream area
+        if (tenantsLoading) {
+            tenantsLoading.style.display = 'none';
+        }
+        
+        // Update badge
+        tenantBadge.textContent = currentTenant.name || currentTenant;
         tenantBadge.classList.remove('bg-secondary');
         tenantBadge.classList.add('bg-info');
         
+        // Update tenant info
         tenantInfo.innerHTML = `
             <div class="alert alert-success" role="alert">
                 <i class="fa-solid fa-check-circle me-2"></i>
-                Connected to tenant: <strong>${currentTenant}</strong>
+                Connected to tenant: <strong>${currentTenant.name || currentTenant}</strong>
             </div>
         `;
+        
+        // Update dropdown and navigation indicators
+        if (activeTenantName) {
+            activeTenantName.textContent = currentTenant.name || currentTenant;
+        }
+        
+        if (currentTenantNameSpan) {
+            currentTenantNameSpan.textContent = currentTenant.name || currentTenant;
+        }
+        
+        // Update the nav tenant indicator
+        if (navTenantName) {
+            navTenantName.textContent = currentTenant.name || currentTenant;
+        }
+        
+        if (tenantNavItem) {
+            tenantNavItem.style.display = 'block';
+        }
+        
         unlinkTenantBtn.disabled = false;
+        
+        // Also update the Message Stream area to show the current tenant
+        const tenantLoadingElement = document.getElementById('tenantsLoading');
+        if (tenantLoadingElement) {
+            tenantLoadingElement.innerHTML = `
+                <p class="mt-2">
+                    <i class="fa-solid fa-check-circle text-success me-2"></i>
+                    Connected to tenant: <strong>${currentTenant.name || currentTenant}</strong>
+                </p>
+            `;
+        }
     } else {
+        // Update badge
         tenantBadge.textContent = 'No Tenant';
         tenantBadge.classList.remove('bg-info');
         tenantBadge.classList.add('bg-secondary');
         
+        // Update tenant info
         tenantInfo.innerHTML = `
             <div class="alert alert-info" role="alert">
                 <i class="fa-solid fa-info-circle me-2"></i>
                 To connect to a tenant, either provide an OTP from the Cisco DNA-Cloud portal or use existing tenant credentials.
             </div>
         `;
+        
+        // Update dropdown and navigation indicators
+        if (activeTenantName) {
+            activeTenantName.textContent = 'Select Tenant';
+        }
+        
+        if (currentTenantNameSpan) {
+            currentTenantNameSpan.textContent = 'No Tenant';
+        }
+        
+        // Hide the nav tenant indicator
+        if (navTenantName) {
+            navTenantName.textContent = 'None';
+        }
+        
+        if (tenantNavItem) {
+            tenantNavItem.style.display = 'none';
+        }
+        
         unlinkTenantBtn.disabled = true;
     }
 }
@@ -389,6 +536,22 @@ function updateConnectionStatus() {
 function updateDevicesList(devices) {
     devicesList = devices;
     updateDevicesTable();
+}
+
+// Fetch devices for a specific tenant
+function fetchTenantDevices(tenantId) {
+    console.log('Fetching devices for tenant:', tenantId);
+    const apiUrl = `/api/tenants/${tenantId}/devices`;
+    
+    fetch(apiUrl)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Devices data received:', data);
+            updateDevicesList(data);
+        })
+        .catch(error => {
+            console.error('Error fetching devices:', error);
+        });
 }
 
 function updateDevicesTable() {
@@ -515,6 +678,26 @@ function clearMessages() {
             <p>No messages received yet</p>
         </div>
     `;
+}
+
+// Function to update the message container, removing any unwanted content
+function updateMessageContainer() {
+    const msgContainer = document.getElementById('message-container');
+    if (msgContainer) {
+        // Clear any "Link New Tenant" text or buttons that might be showing
+        const linkNewTenantElements = msgContainer.querySelectorAll('button, .link-tenant-btn');
+        linkNewTenantElements.forEach(element => element.remove());
+        
+        // Make sure we have the standard "No messages" placeholder if empty
+        if (!msgContainer.innerHTML.trim()) {
+            msgContainer.innerHTML = `
+                <div class="text-center text-muted my-4">
+                    <i class="fa-solid fa-comment-slash fa-2x mb-3"></i>
+                    <p>No messages received yet</p>
+                </div>
+            `;
+        }
+    }
 }
 
 function formatMessageContent(content) {
@@ -877,6 +1060,16 @@ function showToast(message, type = 'info') {
 // Fetch security groups data from API
 function fetchSecurityGroupsData() {
     console.log('Fetching security groups data, tenant:', currentTenant, 'devices:', devicesList.length);
+    
+    // If currentTenant is not set, try to get it from the tenants list first
+    if (!currentTenant && tenants && tenants.length > 0) {
+        // Find default tenant
+        const defaultTenant = tenants.find(tenant => tenant.isDefault);
+        if (defaultTenant) {
+            console.log('Using default tenant from list:', defaultTenant);
+            currentTenant = defaultTenant;
+        }
+    }
     
     // Only fetch if there's a linked tenant
     if (!currentTenant) {

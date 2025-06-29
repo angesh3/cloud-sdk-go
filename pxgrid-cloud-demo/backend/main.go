@@ -37,8 +37,11 @@ type TenantConfig struct {
 }
 
 type Config struct {
-	App    AppConfig    `yaml:"app"`
-	Tenant TenantConfig `yaml:"tenant"`
+	App           AppConfig                `yaml:"app"`
+	Tenants       map[string]TenantConfig  `yaml:"tenants"`
+	DefaultTenantId string                 `yaml:"defaultTenantId"`
+	// For backward compatibility
+	Tenant        TenantConfig `yaml:"tenant"` 
 }
 
 // Message store
@@ -50,6 +53,7 @@ type MessageStore struct {
 // Message format for UI
 type Message struct {
 	Time       time.Time `json:"time"`
+	TenantID   string    `json:"tenantId"`
 	TenantName string    `json:"tenantName"`
 	DeviceName string    `json:"deviceName"`
 	Stream     string    `json:"stream"`
@@ -60,6 +64,7 @@ type Message struct {
 type DeviceInfo struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
+	TenantID   string `json:"tenantId"`
 	TenantName string `json:"tenantName"`
 	Status     string `json:"status"` // "active" or "inactive"
 }
@@ -72,7 +77,7 @@ var (
 	clients      = make(map[*websocket.Conn]bool)
 	clientsMutex sync.Mutex
 	app          *sdk.App
-	tenant       *sdk.Tenant
+	tenantManager *TenantManager
 	upgrader     = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
@@ -88,11 +93,20 @@ func loadConfig(file string) (*Config, error) {
 		return nil, err
 	}
 
-	c := Config{}
+	c := Config{
+		Tenants: make(map[string]TenantConfig),
+	}
 	err = yaml.Unmarshal(data, &c)
 	if err != nil {
 		return nil, err
 	}
+	
+	// Handle backward compatibility - if there's a single tenant in the old format
+	if len(c.Tenants) == 0 && c.Tenant.ID != "" {
+		c.Tenants[c.Tenant.ID] = c.Tenant
+		c.DefaultTenantId = c.Tenant.ID
+	}
+	
 	return &c, nil
 }
 
@@ -106,8 +120,11 @@ func storeConfig(file string, c *Config) error {
 
 // SDK Message handler
 func messageHandler(id string, d *sdk.Device, stream string, p []byte) {
+	tenantID := d.Tenant().ID()
+
 	msg := Message{
 		Time:       time.Now(),
+		TenantID:   tenantID,
 		TenantName: d.Tenant().Name(),
 		DeviceName: d.Name(),
 		Stream:     stream,
@@ -116,23 +133,30 @@ func messageHandler(id string, d *sdk.Device, stream string, p []byte) {
 
 	messageStore.Lock()
 	messageStore.Messages = append(messageStore.Messages, msg)
-	if len(messageStore.Messages) > 100 {
-		messageStore.Messages = messageStore.Messages[1:]
+	if len(messageStore.Messages) > 200 { // Increased for multi-tenant support
+		messageStore.Messages = messageStore.Messages[len(messageStore.Messages)-200:]
 	}
 	messageStore.Unlock()
 
 	// Broadcast to all WebSocket clients
 	broadcastToClients(msg)
 
-	log.Printf("Message received: %s, %s, %s\n", d.Tenant().Name(), d.Name(), stream)
+	log.Printf("[Tenant: %s] Message received: %s, %s\n", d.Tenant().Name(), d.Name(), stream)
 }
 
 // SDK Activation handler
 func activationHandler(d *sdk.Device) {
+	tenantID := d.Tenant().ID()
+
+	// Add to tenant manager
+	tenantManager.AddDeviceToTenant(d)
+
+	// Also maintain global device store for backward compatibility
 	deviceMutex.Lock()
 	deviceStore[d.ID()] = DeviceInfo{
 		ID:         d.ID(),
 		Name:       d.Name(),
+		TenantID:   tenantID,
 		TenantName: d.Tenant().Name(),
 		Status:     "active",
 	}
@@ -142,11 +166,15 @@ func activationHandler(d *sdk.Device) {
 	storeActiveDevice(d)
 
 	broadcastDeviceUpdate()
-	log.Printf("Device activated: %s (%s)\n", d.Name(), d.ID())
+	log.Printf("[Tenant: %s] Device activated: %s (%s)\n", d.Tenant().Name(), d.Name(), d.ID())
 }
 
 // SDK Deactivation handler
 func deactivationHandler(d *sdk.Device) {
+	// Update in tenant manager
+	tenantManager.RemoveDeviceFromTenant(d)
+
+	// Update global device store for backward compatibility
 	deviceMutex.Lock()
 	if info, ok := deviceStore[d.ID()]; ok {
 		info.Status = "inactive"
@@ -158,17 +186,20 @@ func deactivationHandler(d *sdk.Device) {
 	removeInactiveDevice(d)
 
 	broadcastDeviceUpdate()
-	log.Printf("Device deactivated: %s (%s)\n", d.Name(), d.ID())
+	log.Printf("[Tenant: %s] Device deactivated: %s (%s)\n", d.Tenant().Name(), d.Name(), d.ID())
 }
 
 // SDK Tenant unlinked handler
 func tenantUnlinkedHandler(t *sdk.Tenant) {
 	log.Printf("Tenant unlinked: %s (%s)\n", t.Name(), t.ID())
 
-	// Update devices for this tenant
+	// Remove tenant from manager (this might be redundant if UnlinkTenant was used)
+	tenantManager.UnlinkTenant(t.ID())
+
+	// Update global devices for backward compatibility
 	deviceMutex.Lock()
 	for id, device := range deviceStore {
-		if device.TenantName == t.Name() {
+		if device.TenantID == t.ID() {
 			device.Status = "inactive"
 			deviceStore[id] = device
 		}
@@ -176,6 +207,9 @@ func tenantUnlinkedHandler(t *sdk.Tenant) {
 	deviceMutex.Unlock()
 
 	broadcastDeviceUpdate()
+	
+	// Also broadcast tenant update
+	broadcastTenantUpdate()
 }
 
 // Broadcast message to all WebSocket clients
@@ -203,12 +237,7 @@ func broadcastToClients(msg Message) {
 
 // Broadcast device updates to all WebSocket clients
 func broadcastDeviceUpdate() {
-	deviceMutex.RLock()
-	devices := make([]DeviceInfo, 0, len(deviceStore))
-	for _, device := range deviceStore {
-		devices = append(devices, device)
-	}
-	deviceMutex.RUnlock()
+	devices := tenantManager.GetAllDevices()
 
 	msgJSON, err := json.Marshal(map[string]interface{}{
 		"type":    "devices",
@@ -216,6 +245,31 @@ func broadcastDeviceUpdate() {
 	})
 	if err != nil {
 		log.Printf("Error marshalling devices: %v", err)
+		return
+	}
+
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+	for client := range clients {
+		err := client.WriteMessage(websocket.TextMessage, msgJSON)
+		if err != nil {
+			log.Printf("Error sending to client: %v", err)
+			client.Close()
+			delete(clients, client)
+		}
+	}
+}
+
+// Broadcast tenant list updates when tenants change
+func broadcastTenantUpdate() {
+	tenants := tenantManager.GetAllTenants()
+
+	msgJSON, err := json.Marshal(map[string]interface{}{
+		"type":    "tenants",
+		"tenants": tenants,
+	})
+	if err != nil {
+		log.Printf("Error marshalling tenants: %v", err)
 		return
 	}
 
@@ -279,30 +333,13 @@ func main() {
 	}
 	defer app.Close()
 
-	// Handle tenant configuration
-	tc := &config.Tenant
-	if tc.Otp != "" {
-		tenant, err = app.LinkTenant(tc.Otp)
-		if err != nil {
-			log.Printf("Failed to link tenant with OTP: %v", err)
-		} else {
-			// Update config with new tenant info
-			tc.Otp = ""
-			tc.ID = tenant.ID()
-			tc.Name = tenant.Name()
-			tc.Token = tenant.ApiToken()
-			storeConfig(configFile, &config)
-			log.Printf("Linked with tenant: %s", tenant.Name())
-		}
-	} else if tc.ID != "" && tc.Name != "" && tc.Token != "" {
-		tenant, err = app.SetTenant(tc.ID, tc.Name, tc.Token)
-		if err != nil {
-			log.Printf("Failed to set tenant to app: %v", err)
-		} else {
-			log.Printf("Linked with existing tenant: %s", tenant.Name())
-		}
-	} else {
-		log.Println("No tenant configured. Use the API to link a tenant with OTP.")
+	// Create tenant manager
+	tenantManager = NewTenantManager(app, configFile)
+	
+	// Load tenants from config
+	err = tenantManager.LoadTenantsFromConfig(&config)
+	if err != nil {
+		log.Printf("Warning: Failed to load tenants from config: %v", err)
 	}
 
 	// Set up Gin HTTP server
@@ -325,38 +362,108 @@ func main() {
 		// Register settings API endpoints
 		registerSettingsAPI(api)
 		
-		// Register security groups API endpoints
-		registerSecurityGroupsAPI(api)
+		// Register tenant-aware security groups API endpoints
+		sgAPI := NewSecurityGroupsAPI(tenantManager)
+		sgAPI.RegisterAPI(api)
 
 		api.GET("/status", func(c *gin.Context) {
-			var tenantName string
-			if tenant != nil {
-				tenantName = tenant.Name()
-			}
-
+			tenants := tenantManager.GetAllTenants()
+		
 			c.JSON(http.StatusOK, gin.H{
 				"status":  "running",
 				"app":     config.App.Id,
-				"tenant":  tenantName,
-				"devices": len(deviceStore),
+				"tenants": len(tenants),
+				"devices": len(tenantManager.GetAllDevices()),
 			})
 		})
 
+		// Get all tenants
+		api.GET("/tenants", func(c *gin.Context) {
+			tenants := tenantManager.GetAllTenants()
+			c.JSON(http.StatusOK, tenants)
+		})
+
+		// Get specific tenant
+		api.GET("/tenants/:id", func(c *gin.Context) {
+			tenantID := c.Param("id")
+			
+			tenantCtx, exists := tenantManager.GetTenant(tenantID)
+			if !exists {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Tenant not found"})
+				return
+			}
+			
+			c.JSON(http.StatusOK, gin.H{
+				"id":     tenantCtx.Config.ID,
+				"name":   tenantCtx.Config.Name,
+			})
+		})
+
+		// Get devices for specific tenant
+		api.GET("/tenants/:id/devices", func(c *gin.Context) {
+			tenantID := c.Param("id")
+			
+			devices, err := tenantManager.GetTenantDevices(tenantID)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			
+			c.JSON(http.StatusOK, devices)
+		})
+
+		// Set default tenant
+		api.POST("/tenants/:id/setDefault", func(c *gin.Context) {
+			tenantID := c.Param("id")
+			
+			err := tenantManager.SetDefaultTenant(tenantID)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			
+			c.JSON(http.StatusOK, gin.H{
+				"message": fmt.Sprintf("Tenant %s set as default", tenantID),
+			})
+			
+			// Broadcast tenant update
+			broadcastTenantUpdate()
+		})
+
 		api.GET("/messages", func(c *gin.Context) {
+			// Check for tenant filter
+			tenantID := c.Query("tenant_id")
+			
 			messageStore.RLock()
 			msgs := messageStore.Messages
 			messageStore.RUnlock()
-
-			c.JSON(http.StatusOK, msgs)
+			
+			// Filter by tenant if requested
+			if tenantID != "" {
+				filteredMsgs := []Message{}
+				for _, msg := range msgs {
+					if msg.TenantID == tenantID {
+						filteredMsgs = append(filteredMsgs, msg)
+					}
+				}
+				c.JSON(http.StatusOK, filteredMsgs)
+			} else {
+				c.JSON(http.StatusOK, msgs)
+			}
 		})
 
 		api.GET("/devices", func(c *gin.Context) {
-			deviceMutex.RLock()
-			devices := make([]DeviceInfo, 0, len(deviceStore))
-			for _, device := range deviceStore {
-				devices = append(devices, device)
+			// Check for tenant filter
+			tenantID := c.Query("tenant_id")
+			
+			var devices []DeviceInfo
+			if tenantID != "" {
+				// Get devices for specific tenant
+				devices, _ = tenantManager.GetTenantDevices(tenantID)
+			} else {
+				// Get all devices
+				devices = tenantManager.GetAllDevices()
 			}
-			deviceMutex.RUnlock()
 
 			c.JSON(http.StatusOK, devices)
 		})
@@ -364,6 +471,7 @@ func main() {
 		api.POST("/tenant/link", func(c *gin.Context) {
 			var request struct {
 				OTP string `json:"otp" binding:"required"`
+				SetAsDefault bool `json:"setAsDefault"`
 			}
 
 			if err := c.ShouldBindJSON(&request); err != nil {
@@ -371,18 +479,19 @@ func main() {
 				return
 			}
 
-			tenant, err = app.LinkTenant(request.OTP)
+			tenant, err := tenantManager.LinkTenant(request.OTP)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to link tenant: %v", err)})
 				return
 			}
 
-			// Update config
-			config.Tenant.Otp = ""
-			config.Tenant.ID = tenant.ID()
-			config.Tenant.Name = tenant.Name()
-			config.Tenant.Token = tenant.ApiToken()
-			storeConfig(configFile, &config)
+			// Set as default if requested
+			if request.SetAsDefault {
+				tenantManager.SetDefaultTenant(tenant.ID())
+			}
+			
+			// Broadcast tenant update
+			broadcastTenantUpdate()
 
 			c.JSON(http.StatusOK, gin.H{
 				"id":   tenant.ID(),
@@ -390,14 +499,19 @@ func main() {
 			})
 		})
 
-		api.POST("/tenant/unlink", func(c *gin.Context) {
-			if tenant == nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "No tenant linked"})
+		// Unlink tenant (multi-tenant support)
+		api.POST("/tenants/:id/unlink", func(c *gin.Context) {
+			tenantID := c.Param("id")
+			
+			// Check if tenant exists
+			tenantCtx, exists := tenantManager.GetTenant(tenantID)
+			if !exists {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Tenant not found"})
 				return
 			}
 
-			tenantName := tenant.Name()
-			err = app.UnlinkTenant(tenant)
+			tenantName := tenantCtx.Config.Name
+			err := tenantManager.UnlinkTenant(tenantID)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to unlink tenant: %v", err)})
 				return
@@ -472,6 +586,11 @@ func main() {
 	// serve individual files as needed
 	r.StaticFile("/app.js", "/app/frontend/app.js")
 	r.StaticFile("/styles.css", "/app/frontend/styles.css")
+	
+	// Add mappings for the JS files used by the app
+	r.StaticFile("/js/utils.js", "/app/frontend/js/utils.js")
+	r.StaticFile("/js/error-handler.js", "/app/frontend/js/error-handler.js")
+	r.StaticFile("/js/tenant-manager.js", "/app/frontend/js/tenant-manager.js")
 	
 	// API proxy was causing route conflicts with specific API endpoints
 	// The proxy code has been removed since we're already registering individual API handlers

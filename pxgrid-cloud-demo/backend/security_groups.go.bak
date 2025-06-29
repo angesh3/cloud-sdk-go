@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/cisco-pxgrid/cloud-sdk-go"
 	"github.com/gin-gonic/gin"
+	sdk "github.com/cisco-pxgrid/cloud-sdk-go"
 )
 
 // SecurityGroup represents a security group from the API response
@@ -31,13 +31,13 @@ type SecurityGroupsResponse struct {
 
 // KPIData represents computed KPI metrics for security groups
 type KPIData struct {
-	TotalCount         int                   `json:"totalCount"`
-	DeletedCount       int                   `json:"deletedCount"`
-	StatusDistribution map[string]int        `json:"statusDistribution"`
-	TagDistribution    map[string]int        `json:"tagDistribution"`
-	CreationTrend      map[string]int        `json:"creationTrend"` // Date -> count
-	DeletionTrend      map[string]int        `json:"deletionTrend"` // Date -> count
-	HistoricalData     []HistoricalDataPoint `json:"historicalData"`
+	TotalCount        int                   `json:"totalCount"`
+	DeletedCount      int                   `json:"deletedCount"`
+	StatusDistribution map[string]int       `json:"statusDistribution"`
+	TagDistribution   map[string]int        `json:"tagDistribution"`
+	CreationTrend     map[string]int        `json:"creationTrend"` // Date -> count
+	DeletionTrend     map[string]int        `json:"deletionTrend"` // Date -> count
+	HistoricalData    []HistoricalDataPoint `json:"historicalData"`
 }
 
 // HistoricalDataPoint represents historical data for KPI trends
@@ -55,25 +55,25 @@ var activeDevices = make(map[string]*sdk.Device)
 
 // SGACL represents a security group ACL from the API response
 type SGACL struct {
-	ID           string   `json:"id,omitempty"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description,omitempty"`
-	ACLContent   string   `json:"aclcontent,omitempty"`
-	IPVersion    string   `json:"ipVersion,omitempty"`
-	GenerationID string   `json:"generationId,omitempty"`
-	ACEs         []string `json:"aces,omitempty"` // Access Control Entries
+	ID          string   `json:"id,omitempty"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	ACLContent  string   `json:"aclcontent,omitempty"`
+	IPVersion   string   `json:"ipVersion,omitempty"`
+	GenerationID string  `json:"generationId,omitempty"`
+	ACEs        []string `json:"aces,omitempty"` // Access Control Entries
 }
 
 // EgressPolicy represents an egress policy from the API response
 type EgressPolicy struct {
-	ID               string `json:"id,omitempty"`
-	Name             string `json:"name"`
-	Description      string `json:"description,omitempty"`
-	SourceSGT        SGT    `json:"sourceSgt,omitempty"`
-	DestinationSGT   SGT    `json:"destinationSgt,omitempty"`
-	ACL              SGACL  `json:"acl,omitempty"`
+	ID              string `json:"id,omitempty"`
+	Name            string `json:"name"`
+	Description     string `json:"description,omitempty"`
+	SourceSGT       SGT    `json:"sourceSgt,omitempty"`
+	DestinationSGT  SGT    `json:"destinationSgt,omitempty"`
+	ACL             SGACL  `json:"acl,omitempty"`
 	MatrixCellStatus string `json:"matrixCellStatus,omitempty"`
-	DefaultRule      string `json:"defaultRule,omitempty"`
+	DefaultRule     string `json:"defaultRule,omitempty"`
 }
 
 // SGT represents a simplified Security Group Tag for references in policies
@@ -97,22 +97,22 @@ func registerSecurityGroupsAPI(r *gin.RouterGroup) {
 // Get complete list of egress policies
 func getEgressPolicies(c *gin.Context) {
 	fmt.Println("Retrieving egress policies list")
-
+	
 	// Get default tenant using helper
 	tenantInstance, ok := getDefaultTenantForSecurityGroups(c)
 	if !ok {
 		return
 	}
 
-	// Find an active device for this tenant
-	device := GetActiveDeviceForTenant(tenantInstance)
+	// Find an active device
+	device := findActiveDevice()
 	if device == nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "No active device found",
 		})
 		return
 	}
-
+	
 	// Send request to get egress policies
 	// Using the endpoint from documentation: POST [restBaseUrl]/getEgressPolicies
 	reqBody := "{}" // Empty request body to get all policies
@@ -137,7 +137,7 @@ func getEgressPolicies(c *gin.Context) {
 
 	// Log response status
 	fmt.Printf("API Response Status: %d %s\n", resp.StatusCode, resp.Status)
-
+	
 	// Parse the response
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -146,10 +146,10 @@ func getEgressPolicies(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// For debugging
 	fmt.Printf("Egress Policies API Response: %s\n", string(respBody))
-
+	
 	// Parse the response into structured data
 	var rawData map[string]interface{}
 	if err := json.Unmarshal(respBody, &rawData); err != nil {
@@ -158,10 +158,10 @@ func getEgressPolicies(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// Extract egress policies from the response
 	var policies []EgressPolicy
-
+	
 	// Try to extract from different possible formats
 	if policiesArray, ok := rawData["egressPolicies"].([]interface{}); ok {
 		for _, policy := range policiesArray {
@@ -182,7 +182,7 @@ func getEgressPolicies(c *gin.Context) {
 			}
 		}
 	}
-
+	
 	// Return the policies list
 	c.JSON(http.StatusOK, policies)
 }
@@ -190,7 +190,7 @@ func getEgressPolicies(c *gin.Context) {
 // Helper function to extract egress policy data from map
 func extractEgressPolicy(data map[string]interface{}) EgressPolicy {
 	policy := EgressPolicy{}
-
+	
 	// Extract basic fields with proper type conversion
 	if id, ok := data["id"].(string); ok {
 		policy.ID = id
@@ -207,29 +207,29 @@ func extractEgressPolicy(data map[string]interface{}) EgressPolicy {
 	if rule, ok := data["defaultRule"].(string); ok {
 		policy.DefaultRule = rule
 	}
-
+	
 	// Extract source SGT
 	if srcSGTData, ok := data["sourceSgt"].(map[string]interface{}); ok {
 		policy.SourceSGT = extractSGT(srcSGTData)
 	}
-
+	
 	// Extract destination SGT
 	if dstSGTData, ok := data["destinationSgt"].(map[string]interface{}); ok {
 		policy.DestinationSGT = extractSGT(dstSGTData)
 	}
-
+	
 	// Extract ACL
 	if aclData, ok := data["acl"].(map[string]interface{}); ok {
 		policy.ACL = extractSGACL(aclData)
 	}
-
+	
 	return policy
 }
 
 // Helper function to extract SGT data from map
 func extractSGT(data map[string]interface{}) SGT {
 	sgt := SGT{}
-
+	
 	// Extract fields with proper type conversion
 	if id, ok := data["id"].(string); ok {
 		sgt.ID = id
@@ -243,16 +243,15 @@ func extractSGT(data map[string]interface{}) SGT {
 		// Some APIs use "value" instead of "tag"
 		sgt.Tag = value
 	}
-
+	
 	return sgt
 }
 
 // Get complete list of security group ACLs
 func getSecurityGroupAcls(c *gin.Context) {
 	fmt.Println("Retrieving security group ACLs list")
-
-	_, ok := getDefaultTenantForSecurityGroups(c)
-	if !ok {
+	
+	if tenant == nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "No tenant linked",
 		})
@@ -267,7 +266,7 @@ func getSecurityGroupAcls(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// Send request to get security group ACLs
 	// Using the endpoint from documentation: POST [restBaseUrl]/getSecurityGroupAcls
 	reqBody := "{}" // Empty request body to get all ACLs
@@ -288,7 +287,7 @@ func getSecurityGroupAcls(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-
+	
 	// Parse the response
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -297,10 +296,10 @@ func getSecurityGroupAcls(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// For debugging
 	fmt.Printf("SGACL API Response: %s\n", string(respBody))
-
+	
 	// Parse the response into structured data
 	var rawData map[string]interface{}
 	if err := json.Unmarshal(respBody, &rawData); err != nil {
@@ -309,10 +308,10 @@ func getSecurityGroupAcls(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// Extract ACLs from the response
 	var acls []SGACL
-
+	
 	// Try to extract from standard format (securityGroupAcls field)
 	if sgaclsArray, ok := rawData["securityGroupAcls"].([]interface{}); ok {
 		for _, sgacl := range sgaclsArray {
@@ -333,7 +332,7 @@ func getSecurityGroupAcls(c *gin.Context) {
 			}
 		}
 	}
-
+	
 	// Return the ACLs list
 	c.JSON(http.StatusOK, acls)
 }
@@ -341,7 +340,7 @@ func getSecurityGroupAcls(c *gin.Context) {
 // Helper function to extract SGACL data from map
 func extractSGACL(data map[string]interface{}) SGACL {
 	acl := SGACL{}
-
+	
 	// Extract basic fields with proper type conversion
 	if id, ok := data["id"].(string); ok {
 		acl.ID = id
@@ -361,7 +360,7 @@ func extractSGACL(data map[string]interface{}) SGACL {
 	if genID, ok := data["generationId"].(string); ok {
 		acl.GenerationID = genID
 	}
-
+	
 	// Extract ACEs (Access Control Entries) which are typically an array of strings
 	if acesArray, ok := data["aces"].([]interface{}); ok {
 		for _, ace := range acesArray {
@@ -370,7 +369,7 @@ func extractSGACL(data map[string]interface{}) SGACL {
 			}
 		}
 	}
-
+	
 	// If we have aclcontent but no ACEs, try to parse the content
 	if len(acl.ACEs) == 0 && acl.ACLContent != "" {
 		// Simple parsing of ACL content, assuming entries are separated by newlines
@@ -382,16 +381,15 @@ func extractSGACL(data map[string]interface{}) SGACL {
 			}
 		}
 	}
-
+	
 	return acl
 }
 
 // Get complete list of security groups
 func getSecurityGroupsList(c *gin.Context) {
 	fmt.Println("Retrieving security groups list")
-
-	_, ok := getDefaultTenantForSecurityGroups(c)
-	if !ok {
+	
+	if tenant == nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "No tenant linked",
 		})
@@ -406,7 +404,7 @@ func getSecurityGroupsList(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// Send request to get security groups
 	reqBody := "{}" // Empty request body to get all security groups
 	req, err := http.NewRequest(http.MethodPost, "/pxgrid/trustsec/getSecurityGroups", bytes.NewBufferString(reqBody))
@@ -426,7 +424,7 @@ func getSecurityGroupsList(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-
+	
 	// Parse the response
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -435,7 +433,7 @@ func getSecurityGroupsList(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// Parse the response into structured data
 	var rawData map[string]interface{}
 	if err := json.Unmarshal(respBody, &rawData); err != nil {
@@ -444,10 +442,10 @@ func getSecurityGroupsList(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// Extract security groups
 	var securityGroups []SecurityGroup
-
+	
 	// Try to extract from standard format
 	if sgArray, ok := rawData["securityGroups"].([]interface{}); ok {
 		for _, sg := range sgArray {
@@ -467,21 +465,20 @@ func getSecurityGroupsList(c *gin.Context) {
 			}
 		}
 	}
-
+	
 	// Return the security groups list
 	c.JSON(http.StatusOK, securityGroups)
 }
 
 // Debug endpoint to test API paths and parameters
 func debugSecurityGroupsAPI(c *gin.Context) {
-	tenantCtx, ok := getDefaultTenantForSecurityGroups(c)
-	if !ok {
+	if tenant == nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "No tenant linked",
 		})
 		return
 	}
-
+	
 	// Find an active device
 	device := findActiveDevice()
 	if device == nil {
@@ -490,16 +487,16 @@ func debugSecurityGroupsAPI(c *gin.Context) {
 		})
 		return
 	}
-
-	// Create debug info map
+	
+	// Get debug info
 	debugInfo := map[string]interface{}{
 		"device": map[string]string{
 			"id":   device.ID(),
 			"name": device.Name(),
 		},
 		"tenant": map[string]string{
-			"id":   tenantCtx.ID(),
-			"name": tenantCtx.Name(),
+			"id":   tenant.ID(),
+			"name": tenant.Name(),
 		},
 		"availablePaths": []string{
 			"/pxgrid/trustsec/getSecurityGroups",
@@ -509,7 +506,7 @@ func debugSecurityGroupsAPI(c *gin.Context) {
 			"/pxgrid/trustsec/getBulkSecurityGroups",
 		},
 	}
-
+	
 	// Try a test query with minimal path
 	testPath := "/pxgrid/ise/config/trustsec"
 	req, _ := http.NewRequest(http.MethodGet, testPath, nil)
@@ -528,7 +525,7 @@ func debugSecurityGroupsAPI(c *gin.Context) {
 		}
 		resp.Body.Close()
 	}
-
+	
 	c.JSON(http.StatusOK, debugInfo)
 }
 
@@ -536,7 +533,7 @@ func debugSecurityGroupsAPI(c *gin.Context) {
 func findActiveDevice() *sdk.Device {
 	deviceMutex.RLock()
 	defer deviceMutex.RUnlock()
-
+	
 	for id, deviceInfo := range deviceStore {
 		if deviceInfo.Status == "active" {
 			device, exists := activeDevices[id]
@@ -566,8 +563,7 @@ func init() {
 
 // Retrieve security groups from the API
 func getSecurityGroups(c *gin.Context) {
-	_, ok := getDefaultTenantForSecurityGroups(c)
-	if !ok {
+	if tenant == nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "No tenant linked",
 		})
@@ -617,17 +613,16 @@ func getSecurityGroups(c *gin.Context) {
 
 // Get computed KPI data for security groups
 func getSecurityGroupsKPI(c *gin.Context) {
-	fmt.Println("Retrieving security groups KPI (tenant-aware)")
-
-	tenantInstance, ok := getDefaultTenantForSecurityGroups(c)
-	if !ok {
+	fmt.Println("Received security groups KPI request")
+	
+	if tenant == nil {
 		fmt.Println("Error: No tenant linked")
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "No tenant linked",
 		})
 		return
 	}
-	fmt.Printf("Using tenant: %s (%s) for security groups KPI\n", tenantInstance.Name(), tenantInstance.ID())
+	fmt.Printf("Using tenant: %s (%s)\n", tenant.Name(), tenant.ID())
 
 	// Find an active device
 	device := findActiveDevice()
@@ -644,7 +639,7 @@ func getSecurityGroupsKPI(c *gin.Context) {
 	// See: /Users/anvikram/code/cisco/spike/cloud-sdk-go/README.md
 	reqBody := "{}" // Empty request body to get all security groups
 	fmt.Printf("Sending security groups request: %s\n", reqBody)
-
+	
 	// Create request with the proper endpoint and method
 	req, err := http.NewRequest(http.MethodPost, "/pxgrid/trustsec/getSecurityGroups", bytes.NewBufferString(reqBody))
 	if err != nil {
@@ -661,7 +656,7 @@ func getSecurityGroupsKPI(c *gin.Context) {
 	fmt.Printf("  - Name: %s\n", device.Name())
 	fmt.Printf("  - Tenant ID: %s\n", device.Tenant().ID())
 	fmt.Printf("  - Tenant Name: %s\n", device.Tenant().Name())
-
+	
 	// Log request details
 	fmt.Printf("Request URL: %s\n", req.URL.String())
 	fmt.Printf("Request Method: %s\n", req.Method)
@@ -670,7 +665,7 @@ func getSecurityGroupsKPI(c *gin.Context) {
 		fmt.Printf("  %s: %v\n", k, v)
 	}
 	fmt.Printf("Request Body: %s\n", reqBody)
-
+	
 	// Execute the request
 	fmt.Println("Executing security groups API request...")
 	resp, err := device.Query(req)
@@ -689,7 +684,7 @@ func getSecurityGroupsKPI(c *gin.Context) {
 	for k, v := range resp.Header {
 		fmt.Printf("  %s: %v\n", k, v)
 	}
-
+	
 	// Parse the response - use a map for flexibility with API format
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -699,11 +694,11 @@ func getSecurityGroupsKPI(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// Log the raw response for debugging
 	rawResponse := string(respBody)
 	fmt.Printf("Raw API response: %s\n", rawResponse)
-
+	
 	// First try parsing with generic map to understand structure
 	var rawData map[string]interface{}
 	if err := json.Unmarshal(respBody, &rawData); err != nil {
@@ -713,16 +708,16 @@ func getSecurityGroupsKPI(c *gin.Context) {
 		})
 		return
 	}
-
+	
 	// Print structure of the response for debugging
 	fmt.Println("API Response Structure:")
 	for k, v := range rawData {
 		fmt.Printf("Key: %s, Type: %T\n", k, v)
 	}
-
+	
 	// Create a manual SecurityGroupsResponse with the data
 	var securityGroups []SecurityGroup
-
+	
 	// Extract securityGroups from the response based on what's actually in the data
 	// Attempt to get from a standard format first
 	if sgArray, ok := rawData["securityGroups"].([]interface{}); ok {
@@ -736,7 +731,7 @@ func getSecurityGroupsKPI(c *gin.Context) {
 	} else {
 		// Try other possible formats in the response
 		fmt.Println("Could not find standard securityGroups array, trying alternatives")
-
+		
 		// If the response is itself an array of security groups
 		if sgArray, ok := rawData["response"].([]interface{}); ok {
 			for _, sg := range sgArray {
@@ -747,14 +742,14 @@ func getSecurityGroupsKPI(c *gin.Context) {
 			}
 		}
 	}
-
+	
 	// Construct a SecurityGroupsResponse
 	securityGroupsData := SecurityGroupsResponse{
 		SecurityGroups: securityGroups,
 	}
-
+	
 	fmt.Printf("Processed %d security groups\n", len(securityGroupsData.SecurityGroups))
-
+	
 	// Compute KPI data
 	kpiData := computeKPIData(securityGroupsData)
 	c.JSON(http.StatusOK, kpiData)
@@ -762,23 +757,12 @@ func getSecurityGroupsKPI(c *gin.Context) {
 
 // Trigger a refresh of security groups data
 func refreshSecurityGroupsData(c *gin.Context) {
-	// Get the default tenant directly from the tenant manager instead of helper
-	// This provides a more direct approach and avoids any potential issues with the helper
-	fmt.Println("Refreshing security groups data (tenant-aware)")
-
-	defaultTenantCtx, exists := tenantManager.GetDefaultTenant()
-	if !exists || defaultTenantCtx == nil || defaultTenantCtx.Instance == nil {
-		fmt.Println("ERROR: No default tenant found for refresh operation")
+	if tenant == nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "No tenant linked",
-			"status":  "error",
-			"message": "Please link a tenant before accessing security groups data",
+			"error": "No tenant linked",
 		})
 		return
 	}
-
-	tenant := defaultTenantCtx.Instance
-	fmt.Printf("Using tenant: %s (%s) for refresh\n", tenant.Name(), tenant.ID())
 
 	// Find an active device
 	device := findActiveDevice()
@@ -790,11 +774,11 @@ func refreshSecurityGroupsData(c *gin.Context) {
 	}
 
 	now := time.Now()
-
+	
 	// Create request body for the API call
 	reqBody := "{}" // Empty request to get all security groups
 	fmt.Println("Sending refresh request to security groups API")
-
+	
 	req, err := http.NewRequest(http.MethodPost, "/pxgrid/ise/config/trustsec/getSecurityGroups", bytes.NewBufferString(reqBody))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -824,12 +808,12 @@ func refreshSecurityGroupsData(c *gin.Context) {
 
 	// Update historical data
 	updateHistoricalData(securityGroupsData, now)
-
+	
 	// Update last polled time
 	lastPolledTime = now
-
+	
 	c.JSON(http.StatusOK, gin.H{
-		"message":   "Security groups data refreshed",
+		"message": "Security groups data refreshed",
 		"timestamp": now.Format(time.RFC3339),
 	})
 }
@@ -837,7 +821,7 @@ func refreshSecurityGroupsData(c *gin.Context) {
 // Compute KPI data from security groups response
 func computeKPIData(data SecurityGroupsResponse) KPIData {
 	totalSecurityGroups := len(data.SecurityGroups)
-
+	
 	kpi := KPIData{
 		TotalCount:         totalSecurityGroups,
 		DeletedCount:       0, // No deleted groups data in the new API format
@@ -851,7 +835,7 @@ func computeKPIData(data SecurityGroupsResponse) KPIData {
 	// Get current date for trend data
 	currentDate := time.Now().Format("2006-01-02")
 	kpi.CreationTrend[currentDate] = totalSecurityGroups
-
+	
 	// Calculate tag distribution from security groups
 	for _, group := range data.SecurityGroups {
 		// Add to active count
@@ -869,7 +853,7 @@ func computeKPIData(data SecurityGroupsResponse) KPIData {
 // Helper function to extract security group data from map
 func extractSecurityGroup(data map[string]interface{}) SecurityGroup {
 	sg := SecurityGroup{}
-
+	
 	// Extract fields with proper type conversion
 	if id, ok := data["id"].(string); ok {
 		sg.ID = id
@@ -889,7 +873,7 @@ func extractSecurityGroup(data map[string]interface{}) SecurityGroup {
 		// Some APIs use "sgt" for the tag
 		sg.Tag = sgt
 	}
-
+	
 	// Boolean values with type conversion
 	if propagate, ok := data["propagateToApic"].(bool); ok {
 		sg.Propagate = propagate
@@ -897,7 +881,7 @@ func extractSecurityGroup(data map[string]interface{}) SecurityGroup {
 	if defaultSGT, ok := data["defaultSGT"].(bool); ok {
 		sg.Default = defaultSGT
 	}
-
+	
 	return sg
 }
 
@@ -905,16 +889,16 @@ func extractSecurityGroup(data map[string]interface{}) SecurityGroup {
 func updateHistoricalData(data SecurityGroupsResponse, timestamp time.Time) {
 	// Count total groups
 	totalCount := len(data.SecurityGroups)
-
+	
 	// For this API, we can't determine which groups are new since creation time isn't available
 	// We'll just record the total count over time
-
+	
 	// Create a new historical data point
 	dataPoint := HistoricalDataPoint{
 		Timestamp:    timestamp,
 		TotalCount:   totalCount,
-		NewCount:     0, // We can't determine new groups from this API
-		DeletedCount: 0, // We can't determine deleted groups from this API
+		NewCount:     0,      // We can't determine new groups from this API
+		DeletedCount: 0,      // We can't determine deleted groups from this API
 	}
 
 	// Add to historical data
