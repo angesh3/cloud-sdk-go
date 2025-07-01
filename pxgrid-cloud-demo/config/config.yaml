@@ -1,14 +1,17 @@
 app:
-  id: pxcloud-demo
-  apiKey: TTPAwkA6Tuu3u9pQTomhcPwiTjvsBCwqTXJl7mvlJNpt6SktFWQH5YxDEFMIga8k
-  globalFQDN: dnaservices.cisco.com
-  regionalFQDN: neoffers.cisco.com
-  regionalFQDNs: []
-  readStream: app--pxcloud-demo-R
-  writeStream: app--pxcloud-demo-W
-  groupId: ""
+  id: "your-app-id"  # Replace with your actual app ID
+  apiKey: "your-api-key"  # Replace with your actual API key
+  globalFQDN: "api.pxgrid.cisco.com"
+  regionalFQDN: "api.pxgrid.cisco.com"
+  regionalFQDNs:
+    - "api.pxgrid.cisco.com"
+  readStream: "your-read-stream-id"  # Replace with your actual read stream ID
+  writeStream: "your-write-stream-id"  # Replace with your actual write stream ID
+  groupId: "your-group-id"  # Replace with your actual group ID
 tenant:
+  # Leave OTP empty if you want to link a tenant through the UI
   otp: ""
-  id: a002a341-1df5-46f1-aa20-b2edb44d966f
-  name: ISE
-  token: nubaNuzJsNOCrZEy1qsj9zDhisn9gMrZn5pdeBkJ8H8b7iPDUu1o3zJJygLMtflI
+  # Or fill these if you want to use existing tenant credentials
+  id: ""
+  name: ""
+  token: ""
