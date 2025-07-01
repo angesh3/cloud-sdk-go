@@ -277,22 +277,14 @@
                     // Store in localStorage
                     localStorage.setItem('auth_token', mockToken);
                     localStorage.setItem('user_data', JSON.stringify(adminUser));
-                    localStorage.removeItem('redirect_history'); // Clear redirect history on successful login
                     
                     // Show success message briefly before redirecting
                     submitButton.innerHTML = '<i class="fas fa-check-circle me-2"></i>Login successful!';
                     submitButton.classList.replace('btn-primary', 'btn-success');
                     
                     setTimeout(() => {
-                        // Check for redirect parameter
-                        if (redirectURL && redirectURL.startsWith('/admin')) {
-                            console.log('Redirecting admin to:', redirectURL);
-                            // Go to admin dashboard directly (absolute path)
-                            window.location.href = redirectURL;
-                        } else {
-                            // Redirect to index page instead of admin dashboard to avoid redirect loops
-                            window.location.href = 'index.html';
-                        }
+                        // Always redirect admin to admin dashboard
+                        window.location.href = 'admin/dashboard.html';
                     }, 500);
                     return;
                 }

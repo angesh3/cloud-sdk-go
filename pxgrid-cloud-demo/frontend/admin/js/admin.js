@@ -67,11 +67,34 @@ function checkAuthentication() {
     }
     
     console.log('Verifying admin status with server');
-    // Verify token with server
+    // Special handling for admin token
+    if (token.startsWith('admin-token-')) {
+        // This is a direct admin login token, we can trust it without verification
+        console.log('Using admin token directly');
+        const userData = localStorage.getItem('user_data');
+        if (userData) {
+            const user = JSON.parse(userData);
+            if (user.role === 'admin') {
+                currentUser = user;
+                
+                // Update UI with user info
+                document.getElementById('current-user').textContent = user.username;
+                document.getElementById('username-display').textContent = user.username;
+                
+                // Load initial data
+                loadUsers();
+                loadTenants();
+                return;
+            }
+        }
+    }
+    
+    // Regular token verification with server
     fetch('/api/auth/me', {
         headers: {
             'Authorization': `Bearer ${token}`
-        }
+        },
+        credentials: 'include'
     })
     .then(response => {
         if (!response.ok) {
@@ -113,7 +136,17 @@ function checkAuthentication() {
 // Logout function
 function logout() {
     const token = localStorage.getItem('auth_token');
+    
     if (token) {
+        if (token.startsWith('admin-token-')) {
+            // For direct admin tokens, just clear local storage
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_data');
+            window.location.href = '../login.html';
+            return;
+        }
+        
+        // Send logout request to server for regular tokens
         fetch('/api/auth/logout', {
             method: 'POST',
             headers: {
