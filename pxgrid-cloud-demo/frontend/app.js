@@ -78,25 +78,30 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
     }
     
-    // Setup WebSocket connection
-    setupWebSocket();
-    
-    // Setup event listeners
-    setupEventListeners();
-    
-    // Get initial application status
-    fetchAppStatus();
-    
-    // Load settings
-    fetchSettings();
-    
-    // Load tenants data - this will initialize currentTenant
-    fetchTenants();
-    
-    // Load security groups data after a short delay to ensure tenant data is loaded
-    setTimeout(() => {
-        fetchSecurityGroupsData();
-    }, 1000);
+    // Check authentication first
+    checkAuthentication(function(user) {
+        // User is authenticated, continue with app initialization
+        
+        // Setup WebSocket connection
+        setupWebSocket();
+        
+        // Setup event listeners
+        setupEventListeners();
+        
+        // Get initial application status
+        fetchAppStatus();
+        
+        // Load settings
+        fetchSettings();
+        
+        // Load tenants data - this will initialize currentTenant
+        fetchTenants();
+        
+        // Load security groups data after a short delay to ensure tenant data is loaded
+        setTimeout(() => {
+            fetchSecurityGroupsData();
+        }, 1000);
+    });
 });
 
 function setupWebSocket() {
@@ -176,6 +181,76 @@ function setupEventListeners() {
     // Clear messages button
     if (clearMessagesBtn) {
         clearMessagesBtn.addEventListener('click', clearMessages);
+    }
+    
+    // Logout button
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            logout(); // This comes from auth.js
+        });
+    }
+    
+    // Update settings visibility based on user role
+    const user = getCurrentUser();
+    if (user && user.role !== 'admin') {
+        // Hide settings tab for non-admin users
+        const settingsTab = document.getElementById('settings-tab-link');
+        if (settingsTab) {
+            settingsTab.style.display = 'none';
+        }
+    }
+    
+    // Admin link handler
+    const adminLink = document.getElementById('admin-link');
+    if (adminLink) {
+        adminLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            console.log('Admin link clicked');
+            // Get auth token and user data
+            const token = localStorage.getItem('auth_token');
+            const userData = localStorage.getItem('user_data');
+            
+            if (!token) {
+                // No token, redirect to login
+                console.log('No auth token, redirecting to login');
+                window.location.href = 'login.html';
+                return;
+            }
+            
+            // Verify user is admin before proceeding
+            if (userData) {
+                try {
+                    const user = JSON.parse(userData);
+                    if (user.role !== 'admin') {
+                        console.log('User is not admin, cannot access admin area');
+                        showToast('Admin access required', 'warning');
+                        return;
+                    }
+                } catch (e) {
+                    console.error('Error parsing user data:', e);
+                }
+            }
+            
+            // Create a form to submit POST request with authentication
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = 'admin/dashboard.html';
+            form.style.display = 'none';
+            
+            // Add token as hidden field
+            const tokenField = document.createElement('input');
+            tokenField.type = 'hidden';
+            tokenField.name = 'auth_token';
+            tokenField.value = token;
+            form.appendChild(tokenField);
+            
+            // Submit the form
+            document.body.appendChild(form);
+            console.log('Submitting admin access form with authentication');
+            form.submit();
+        });
     }
     
     // View all SGTs button
@@ -274,47 +349,64 @@ function fetchTenants() {
     // Hide the "Link New Tenant" text that might appear in the message container
     updateMessageContainer();
     
-    fetch(apiUrl)
-        .then(response => response.json())
-        .then(data => {
-            console.log('Tenants data received:', data);
-            tenants = data;
+    // Get the current user
+    const user = getCurrentUser();
+    
+    // Add authentication headers to request
+    const headers = getAuthHeaders();
+    
+    fetch(apiUrl, {
+        headers: headers
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Tenants data received:', data);
+        tenants = Array.isArray(data) ? data : (data.tenants || []);
+        
+        // Show empty state if no tenants available
+        if (tenants.length === 0) {
+            const emptyStateElem = document.getElementById('tenantsEmpty');
+            if (emptyStateElem) {
+                emptyStateElem.style.display = 'block';
+            }
+            return;
+        }
+        
+        // Find default tenant if any
+        const defaultTenant = tenants.find(tenant => tenant.isDefault);
+        if (defaultTenant) {
+            console.log('Default tenant found:', defaultTenant);
+            currentTenant = defaultTenant;
+            currentTenantId = defaultTenant.id;
+            updateTenantUI();
             
-            // Find default tenant if any
-            const defaultTenant = tenants.find(tenant => tenant.isDefault);
-            if (defaultTenant) {
-                console.log('Default tenant found:', defaultTenant);
-                currentTenant = defaultTenant;
-                currentTenantId = defaultTenant.id;
-                updateTenantUI();
+            // Update the message container to show the connected tenant
+            const messageContainer = document.getElementById('message-container');
+            if (messageContainer) {
+                const tenantInfo = document.createElement('div');
+                tenantInfo.className = 'alert alert-success';
+                tenantInfo.innerHTML = `
+                    <i class="fa-solid fa-check-circle me-2"></i>
+                    Connected to tenant: <strong>${defaultTenant.name}</strong> (ID: ${defaultTenant.id})
+                    ${user ? `<small class="d-block mt-1">(User: ${user.username})</small>` : ''}
+                `;
                 
-                // Update the message container to show the connected tenant
-                const messageContainer = document.getElementById('message-container');
-                if (messageContainer) {
-                    const tenantInfo = document.createElement('div');
-                    tenantInfo.className = 'alert alert-success';
-                    tenantInfo.innerHTML = `
-                        <i class="fa-solid fa-check-circle me-2"></i>
-                        Connected to tenant: <strong>${defaultTenant.name}</strong> (ID: ${defaultTenant.id})
-                    `;
-                    
-                    // Add the tenant info at the top of message container
-                    if (messageContainer.firstChild) {
-                        messageContainer.insertBefore(tenantInfo, messageContainer.firstChild);
-                    } else {
-                        messageContainer.appendChild(tenantInfo);
-                    }
+                // Add the tenant info at the top of message container
+                if (messageContainer.firstChild) {
+                    messageContainer.insertBefore(tenantInfo, messageContainer.firstChild);
+                } else {
+                    messageContainer.appendChild(tenantInfo);
                 }
             }
             
             // Fetch devices for the default tenant
-            if (defaultTenant) {
-                fetchTenantDevices(defaultTenant.id);
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching tenants:', error);
-        });
+            fetchTenantDevices(defaultTenant.id);
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching tenants:', error);
+        showToast('Failed to load tenants. Please check your permissions.', 'danger');
+    });
 }
 
 function linkTenant() {

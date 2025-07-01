@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Access - Cisco pxGrid Cloud Demo</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <script>
+        // Immediate authentication check
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check for auth token
+            const token = localStorage.getItem('auth_token');
+            const userData = localStorage.getItem('user_data');
+            
+            if (!token) {
+                console.log('No authentication token found - redirecting to login');
+                window.location.href = 'login.html';
+                return;
+            }
+            
+            // Check if user is admin
+            if (userData) {
+                try {
+                    const user = JSON.parse(userData);
+                    if (user.role === 'admin') {
+                        // Redirect to admin dashboard
+                        console.log('Admin verification passed - redirecting to admin dashboard');
+                        window.location.href = 'admin/dashboard.html';
+                        return;
+                    } else {
+                        console.log('User is not admin - access denied');
+                        document.getElementById('access-denied').style.display = 'block';
+                    }
+                } catch (e) {
+                    console.error('Error parsing user data:', e);
+                    window.location.href = 'login.html';
+                }
+            } else {
+                // User data not found, redirect to login
+                console.log('User data not found - redirecting to login');
+                window.location.href = 'login.html';
+            }
+        });
+    </script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .navbar {
+            background-color: #005073;
+        }
+        .navbar-brand {
+            color: white;
+            font-weight: 500;
+        }
+        .access-message {
+            max-width: 500px;
+            margin: 4rem auto;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        .loading {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 50vh;
+        }
+        #access-denied {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark">
+        <div class="container">
+            <a class="navbar-brand d-flex align-items-center" href="index.html">
+                <i class="fas fa-network-wired me-2"></i>
+                Cisco pxGrid Cloud Demo
+            </a>
+        </div>
+    </nav>
+
+    <main class="container">
+        <div class="loading" id="loading">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Verifying admin access...</p>
+        </div>
+        
+        <div class="access-message bg-danger text-white" id="access-denied">
+            <h4><i class="fas fa-exclamation-triangle me-2"></i> Access Denied</h4>
+            <p>You don't have permission to access the admin area.</p>
+            <a href="index.html" class="btn btn-light mt-3">Return to Dashboard</a>
+        </div>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+</body>
+</html>

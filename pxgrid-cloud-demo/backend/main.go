@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -78,6 +79,7 @@ var (
 	clientsMutex sync.Mutex
 	app          *sdk.App
 	tenantManager *TenantManager
+	userManager   *UserManager
 	upgrader     = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
@@ -341,24 +343,96 @@ func main() {
 	if err != nil {
 		log.Printf("Warning: Failed to load tenants from config: %v", err)
 	}
-
-	// Set up Gin HTTP server
+	
+	// Initialize user manager
+	usersDBPath := filepath.Join(filepath.Dir(configFile), "users.json")
+	userManager, err = NewUserManager(usersDBPath)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize user manager: %v", err)
+		// Continue anyway - we can work without user management
+	}
 	r := gin.Default()
 	r.Use(cors.Default())
 
-	// Serve HTML files for each route
-	r.StaticFile("/", "/app/frontend/index.html")
-	r.StaticFile("/index.html", "/app/frontend/index.html")
-	r.StaticFile("/settings.html", "/app/frontend/settings.html")
-	r.StaticFile("/dashboard.html", "/app/frontend/dashboard.html")
-	// Serve CSS and JS files (only enable this if we're not using r.Static below)
-	r.StaticFile("/css/bootstrap.min.css", "/app/frontend/css/bootstrap.min.css")
-	r.StaticFile("/css/style.css", "/app/frontend/css/style.css")
-	r.StaticFile("/js/bootstrap.bundle.min.js", "/app/frontend/js/bootstrap.bundle.min.js")
+    // Root routes for HTML files
+    r.GET("/", func(c *gin.Context) {
+        c.File("/app/frontend/index.html")
+    })
+    
+    // Standard login page
+    r.GET("/login", func(c *gin.Context) {
+        c.File("/app/frontend/login.html")
+    })
+    
+    r.GET("/signup", func(c *gin.Context) {
+        c.File("/app/frontend/signup.html")
+    })
+    
+    // Admin API routes are registered later in the API group structure
+    // Do not register them here to avoid duplicate route conflicts
+    
+    // Simple page routes without authentication middleware
+    r.GET("/admin", func(c *gin.Context) {
+        c.Redirect(http.StatusFound, "/admin/dashboard")
+    })
+    
+    // Additional route for admin.html (used by navigation links)
+    r.GET("/admin.html", func(c *gin.Context) {
+        c.Redirect(http.StatusFound, "/admin/dashboard")
+    })
+
+    r.GET("/admin/dashboard", func(c *gin.Context) {
+        // Use the original admin dashboard
+        c.File("/app/frontend/admin/dashboard.html")
+    })
+
+    // STATIC FILE SERVING - with specific routes for assets
+    
+    // Serve specific directories for static assets
+    r.Static("/js", "/app/frontend/js")
+    r.Static("/css", "/app/frontend/css")
+    r.Static("/admin/js", "/app/frontend/admin/js")
+    
+    // Individual HTML files
+    r.StaticFile("/index.html", "/app/frontend/index.html")
+    r.StaticFile("/login.html", "/app/frontend/login.html")
+    r.StaticFile("/signup.html", "/app/frontend/signup.html")
+    r.StaticFile("/settings.html", "/app/frontend/settings.html")
+    r.StaticFile("/styles.css", "/app/frontend/styles.css")
+    r.StaticFile("/app.js", "/app/frontend/app.js")
+    
+    // Admin files
+    r.StaticFile("/admin/dashboard.html", "/app/frontend/admin/dashboard.html")
 
 	// API routes
 	api := r.Group("/api")
 	{
+		// Authentication routes (no middleware required)
+		auth := api.Group("/auth")
+		{
+			auth.POST("/login", loginHandler)
+			auth.POST("/signup", signupHandler)
+			auth.POST("/logout", authMiddleware(), logoutHandler)
+			auth.GET("/me", authMiddleware(), getCurrentUserHandler)
+		}
+
+		// Admin routes (requires admin role)
+		admin := api.Group("/admin")
+		{
+			// User management
+			admin.GET("/users", adminMiddleware(), listUsersHandler)
+			admin.POST("/users", adminMiddleware(), createUserHandler)
+			admin.GET("/users/:id", adminMiddleware(), getUserHandler)
+			admin.PUT("/users/:id", adminMiddleware(), updateUserHandler)
+			admin.DELETE("/users/:id", adminMiddleware(), deleteUserHandler)
+
+			// User tenant management
+			admin.PUT("/users/:id/tenants", adminMiddleware(), updateUserTenantsHandler)
+			admin.GET("/users/:id/tenants", adminMiddleware(), getUserTenantsHandler)
+			admin.POST("/users/:id/tenants/:tenantId", adminMiddleware(), addTenantToUserHandler)
+			admin.DELETE("/users/:id/tenants/:tenantId", adminMiddleware(), removeTenantFromUserHandler)
+		}
+
 		// Register settings API endpoints
 		registerSettingsAPI(api)
 		
@@ -581,16 +655,9 @@ func main() {
 		}()
 	})
 
-	// Serve additional static files from the frontend directory
-	// Instead of using r.Static("/static", "/app/frontend") which causes conflicts,
-	// serve individual files as needed
-	r.StaticFile("/app.js", "/app/frontend/app.js")
-	r.StaticFile("/styles.css", "/app/frontend/styles.css")
-	
-	// Add mappings for the JS files used by the app
-	r.StaticFile("/js/utils.js", "/app/frontend/js/utils.js")
-	r.StaticFile("/js/error-handler.js", "/app/frontend/js/error-handler.js")
-	r.StaticFile("/js/tenant-manager.js", "/app/frontend/js/tenant-manager.js")
+	// Add general static file handler for frontend files that aren't already served
+	// Note: We're NOT registering /styles.css here because it's already registered earlier
+	r.Static("/static", "/app/frontend")
 	
 	// API proxy was causing route conflicts with specific API endpoints
 	// The proxy code has been removed since we're already registering individual API handlers
