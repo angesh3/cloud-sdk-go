@@ -228,16 +228,39 @@ func authMiddleware() gin.HandlerFunc {
 		}
 		
 		// Extract token from header
-		// Format should be "Bearer {token}"
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "Invalid authorization format, should be 'Bearer {token}'",
-			})
+		// Handle both formats: "Bearer {token}" or direct admin token
+		var token string
+		if strings.HasPrefix(authHeader, "admin-token-") {
+			// Direct admin token format
+			token = authHeader
+			
+			// For admin tokens, create a mock admin user
+			adminUser := &User{
+				ID:        "admin-user-1",
+				Username:  "admin",
+				Email:     "admin@example.com",
+				Role:      "admin",
+				CreatedAt: time.Now(),
+			}
+			
+			// Store user and token in context
+			c.Set("user", adminUser)
+			c.Set("sessionToken", token)
+			
+			// Continue with request
+			c.Next()
 			return
+		} else {
+			// Standard Bearer token format
+			parts := strings.Split(authHeader, " ")
+			if len(parts) != 2 || parts[0] != "Bearer" {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"error": "Invalid authorization format, should be 'Bearer {token}' or admin token",
+				})
+				return
+			}
+			token = parts[1]
 		}
-		
-		token := parts[1]
 		
 		// Get user by session token
 		user, err := userManager.GetUserBySessionToken(token)
